@@ -29,8 +29,9 @@ jobs:
       - name: Build static export
         run: npm run build
         env:
-          # Repo is served from a subpath on Pages.
-          NEXT_PUBLIC_BASE_PATH: /NYCPAHackathon2026
+          # Pages serves a project site from /<repo-name>. Derive it so a repo
+          # rename never breaks asset/data paths.
+          NEXT_PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
       - name: Disable Jekyll (serve _next/ as-is)
         run: touch out/.nojekyll
       - name: Configure Pages (auto-enable on first run)
