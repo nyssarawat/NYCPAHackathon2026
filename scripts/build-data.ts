@@ -74,6 +74,9 @@ const CT_CROSSWALK: Record<string, Array<[string, number]>> = {
   '09190': [['09001', 1.0]], // Western CT → Fairfield
 };
 
+// The 8 old CT county FIPS the us-atlas map uses (001–015 odd). 2021 ACS reports income at these.
+const CT_COUNTY_FIPS = new Set(['09001', '09003', '09005', '09007', '09009', '09011', '09013', '09015']);
+
 /** Redistribute CT planning-region rows onto old county shapes; drop the region rows. */
 function applyCtCrosswalk(rows: ParsedLyme[]): ParsedLyme[] {
   const byFips = new Map(rows.map((r) => [r.fips, r]));
@@ -146,9 +149,12 @@ async function fetchAcsIncome(): Promise<Map<string, number>> {
   // Census returns an HTML error page (not JSON) when keyless/invalid — detect that, don't JSON.parse it.
   const looksJson = body.trimStart().startsWith('[');
   if (!res.ok || !looksJson) {
-    const hint = CENSUS_KEY
-      ? 'CENSUS_API_KEY appears invalid or rate-limited.'
-      : 'Census rejects keyless requests — get a free instant key at https://api.census.gov/data/key_signup.html and add CENSUS_API_KEY=… to .env.local, then re-run `npm run build:data`.';
+    const invalidKey = /invalid[_ ]?key/i.test(body) || res.url.includes('invalid_key');
+    const hint = !CENSUS_KEY
+      ? 'Census rejects keyless requests — get a free instant key at https://api.census.gov/data/key_signup.html and add CENSUS_API_KEY=… to .env.local, then re-run `npm run build:data`.'
+      : invalidKey
+        ? 'CENSUS_API_KEY is INVALID — a new key must be activated via the link in the confirmation email Census sends before it works. Activate it (or re-check for typos), then re-run `npm run build:data`.'
+        : 'CENSUS_API_KEY request failed (possibly rate-limited). Try again shortly.';
     throw new Error(`Census ACS fetch failed (HTTP ${res.status}). ${hint}`);
   }
 
@@ -174,7 +180,7 @@ async function fetchAcsIncome(): Promise<Map<string, number>> {
 
   // Vintage drift guard: 2021 must report CT at OLD county FIPS (0900x), not 091xx planning regions.
   const hasPlanningRegions = [...income.keys()].some((f) => /^091\d\d$/.test(f));
-  const hasOldCtCounties = [...income.keys()].some((f) => /^0900\d$/.test(f));
+  const hasOldCtCounties = [...income.keys()].some((f) => CT_COUNTY_FIPS.has(f));
   if (hasPlanningRegions || !hasOldCtCounties) {
     console.warn(
       `⚠️  ACS vintage drift: expected CT old counties (0900x), got planningRegions=${hasPlanningRegions} oldCounties=${hasOldCtCounties}. The CT join will be wrong — keep ACS_YEAR at a pre-2022 vintage.`,
@@ -242,7 +248,7 @@ async function main() {
   // Income reconciliation (Gary's rule: account for every bucket).
   const withIncome = Object.values(counties).filter((c) => c.income !== null);
   const noIncome = Object.values(counties).filter((c) => c.income === null);
-  const ctWithIncome = withIncome.filter((c) => /^0900\d$/.test(c.fips));
+  const ctWithIncome = withIncome.filter((c) => CT_COUNTY_FIPS.has(c.fips));
   console.log(`\n=== INCOME RECONCILIATION (ACS ${ACS_YEAR}) ===`);
   console.log(`Counties with income: ${withIncome.length} / ${Object.keys(counties).length}`);
   console.log(
