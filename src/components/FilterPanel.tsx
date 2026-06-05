@@ -114,7 +114,7 @@ export default function FilterPanel({ filters, weights, phase, visible, total, o
           Opportunity weights
         </div>
         <div className="space-y-3">
-          <Slider label="Lyme demand" value={weights.lyme} min={0} max={2} step={0.1} onChange={(v) => setW({ lyme: v })} />
+          <Slider label="Lyme risk" value={weights.lyme} min={0} max={2} step={0.1} onChange={(v) => setW({ lyme: v })} />
           <Slider
             label="Buying power"
             value={weights.income}
