@@ -11,11 +11,20 @@
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { config } from 'dotenv';
 import { percentileRanks } from '../src/lib/score';
 import type { CountyDatum, CountyDataset, IncidenceStatus } from '../src/lib/types';
 
+config({ path: '.env.local' }); // optional CENSUS_API_KEY; Census may reject keyless requests.
+
 const CDC_LYME_CSV =
   'https://www.cdc.gov/lyme/media/files/2025/02/LD_Case_Counts_by_County_2023_updated.csv';
+
+// Phase 2 income. ACS 5-year, 2021 vintage ON PURPOSE: 2021 reports CT at the OLD county FIPS
+// (0900x) the us-atlas map uses; 2022+ switched to 091xx planning regions and would break the join.
+const ACS_YEAR = 2021;
+const ACS_INCOME_VAR = 'B19013_001E'; // median household income, past 12 months
+const CENSUS_KEY = process.env.CENSUS_API_KEY?.trim();
 
 const PUBLIC = resolve(process.cwd(), 'public');
 
@@ -123,6 +132,57 @@ function parseLyme(csv: string): ParsedLyme[] {
   return rows;
 }
 
+/**
+ * Fetch ACS median household income for every county, keyed by 5-digit FIPS.
+ * Key-optional: uses CENSUS_API_KEY if set, else calls keyless — but Census increasingly rejects
+ * keyless requests, so we fail LOUD with the free-signup URL rather than degrade silently.
+ */
+async function fetchAcsIncome(): Promise<Map<string, number>> {
+  const url =
+    `https://api.census.gov/data/${ACS_YEAR}/acs/acs5?get=NAME,${ACS_INCOME_VAR}&for=county:*` +
+    (CENSUS_KEY ? `&key=${CENSUS_KEY}` : '');
+  const res = await fetch(url);
+  const body = await res.text();
+  // Census returns an HTML error page (not JSON) when keyless/invalid — detect that, don't JSON.parse it.
+  const looksJson = body.trimStart().startsWith('[');
+  if (!res.ok || !looksJson) {
+    const hint = CENSUS_KEY
+      ? 'CENSUS_API_KEY appears invalid or rate-limited.'
+      : 'Census rejects keyless requests — get a free instant key at https://api.census.gov/data/key_signup.html and add CENSUS_API_KEY=… to .env.local, then re-run `npm run build:data`.';
+    throw new Error(`Census ACS fetch failed (HTTP ${res.status}). ${hint}`);
+  }
+
+  // Response is a 2-D JSON array; row 0 is the header. Resolve columns by name, never by position.
+  const rows = JSON.parse(body) as string[][];
+  const header = rows[0];
+  const iVal = header.indexOf(ACS_INCOME_VAR);
+  const iState = header.indexOf('state');
+  const iCounty = header.indexOf('county');
+  if (iVal < 0 || iState < 0 || iCounty < 0) {
+    throw new Error(`ACS response missing expected columns. Got header: ${header.join(',')}`);
+  }
+
+  const income = new Map<string, number>();
+  for (let n = 1; n < rows.length; n++) {
+    const r = rows[n];
+    const fips = pad(r[iState], 2) + pad(r[iCounty], 3);
+    const v = Number(r[iVal]);
+    // ACS jam/annotation values are negative sentinels (-666666666, -999999999, …) — drop all <0.
+    if (!Number.isFinite(v) || v < 0) continue;
+    income.set(fips, v);
+  }
+
+  // Vintage drift guard: 2021 must report CT at OLD county FIPS (0900x), not 091xx planning regions.
+  const hasPlanningRegions = [...income.keys()].some((f) => /^091\d\d$/.test(f));
+  const hasOldCtCounties = [...income.keys()].some((f) => /^0900\d$/.test(f));
+  if (hasPlanningRegions || !hasOldCtCounties) {
+    console.warn(
+      `⚠️  ACS vintage drift: expected CT old counties (0900x), got planningRegions=${hasPlanningRegions} oldCounties=${hasOldCtCounties}. The CT join will be wrong — keep ACS_YEAR at a pre-2022 vintage.`,
+    );
+  }
+  return income;
+}
+
 /** Read the us-atlas county FIPS ids for reconciliation. */
 function mapFips(): Set<string> {
   const topo = JSON.parse(readFileSync(resolve(PUBLIC, 'counties-10m.json'), 'utf8'));
@@ -135,20 +195,34 @@ async function main() {
   const rows = applyCtCrosswalk(parseLyme(await fetchLymeCsv()));
   console.log(`Parsed ${rows.length} counties; US 2023 total = ${rows.reduce((s, r) => s + r.lyme2023, 0)}`);
 
+  console.log(`Fetching ACS ${ACS_YEAR} median household income${CENSUS_KEY ? ' (with key)' : ' (keyless)'}…`);
+  const income = await fetchAcsIncome();
+  console.log(`Got income for ${income.size} counties.`);
+
   // Percentile-normalize Lyme (use 3-yr avg for stability).
   const lymeNorms = percentileRanks(rows.map((r) => r.lymeAvg));
+
+  // Percentile-normalize income over ONLY the counties that have it (same util as Lyme).
+  const incomeRows = rows.filter((r) => income.has(r.fips));
+  const incomeRanks = percentileRanks(incomeRows.map((r) => income.get(r.fips) as number));
+  const incomeNorm = new Map(incomeRows.map((r, i) => [r.fips, Math.round(incomeRanks[i] * 10) / 10]));
 
   const counties: Record<string, CountyDatum> = {};
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
     counties[r.fips] = {
       ...r,
-      income: null,
+      income: income.get(r.fips) ?? null,
       sfUnits: null,
       sfShare: null,
       sfPerSqMi: null,
       competitors: null,
-      norm: { lyme: Math.round(lymeNorms[i] * 10) / 10, income: null, density: null, competition: null },
+      norm: {
+        lyme: Math.round(lymeNorms[i] * 10) / 10,
+        income: incomeNorm.get(r.fips) ?? null,
+        density: null,
+        competition: null,
+      },
     };
   }
 
@@ -165,9 +239,22 @@ async function main() {
   console.log(`Data rows not on map: ${dataNotOnMap.length}`, dataNotOnMap.slice(0, 10));
   console.log(`Map features with no Lyme data (render neutral): ${mapNoData.length}`, mapNoData.slice(0, 10));
 
+  // Income reconciliation (Gary's rule: account for every bucket).
+  const withIncome = Object.values(counties).filter((c) => c.income !== null);
+  const noIncome = Object.values(counties).filter((c) => c.income === null);
+  const ctWithIncome = withIncome.filter((c) => /^0900\d$/.test(c.fips));
+  console.log(`\n=== INCOME RECONCILIATION (ACS ${ACS_YEAR}) ===`);
+  console.log(`Counties with income: ${withIncome.length} / ${Object.keys(counties).length}`);
+  console.log(
+    `Counties without income (norm.income=null): ${noIncome.length}`,
+    noIncome.slice(0, 10).map((c) => `${c.fips} ${c.name}`),
+  );
+  console.log(`CT old-county shapes with income (expect 8): ${ctWithIncome.length}`, ctWithIncome.map((c) => c.fips));
+
+  const phase: 1 | 2 = withIncome.length > 0 ? 2 : 1;
   const dataset: CountyDataset = {
     generatedAt: new Date().toISOString(),
-    phase: 1,
+    phase,
     reconciliation: { mapFeatures: features.size, dataMatched: matched.length },
     counties,
   };

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { CountyDataset, CountyDatum, CompositeWeights, Filters, Layer } from '@/lib/types';
 import { DEFAULT_WEIGHTS, computeComposite } from '@/lib/score';
-import { LAYER_META } from '@/lib/colorScale';
+import { LAYER_META, type MetricAvailability } from '@/lib/colorScale';
 import { asset } from '@/lib/basePath';
 import ChoroplethMap from '@/components/ChoroplethMap';
 import CountyHoverCard from '@/components/CountyHoverCard';
@@ -32,8 +32,20 @@ export default function Home() {
       .catch((e) => console.error('counties.json load failed', e));
   }, []);
 
-  const counties = data?.counties ?? {};
-  const phase = data?.phase ?? 1;
+  const counties = useMemo(() => data?.counties ?? {}, [data]);
+
+  // Gate Phase-2 UI on actual data availability, not a coarse phase flag: each metric unlocks
+  // independently as soon as at least one county has a non-null norm for it.
+  const available = useMemo<MetricAvailability>(() => {
+    const vals = Object.values(counties);
+    return {
+      income: vals.some((d) => d.norm.income !== null),
+      density: vals.some((d) => d.norm.density !== null),
+      competition: vals.some((d) => d.norm.competition !== null),
+    };
+  }, [counties]);
+
+  const pending = (['income', 'density', 'competition'] as const).filter((m) => !available[m]);
 
   const visibleFips = useMemo(() => {
     const s = new Set<string>();
@@ -71,20 +83,21 @@ export default function Home() {
             {LAYER_META[activeLayer].label} — {LAYER_META[activeLayer].sub}
           </p>
         </div>
-        {phase < 2 && (
+        {pending.length > 0 && (
           <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-3 py-1 text-xs text-amber-300">
-            Phase 1 · Lyme only — add Census key for income / density / competition
+            {available.income ? 'Income live · ' : 'Phase 1 · Lyme only · '}
+            {pending.map((m) => LAYER_META[m].label).join(' + ')} pending Census key
           </span>
         )}
       </header>
 
       <div className="flex min-h-0 flex-1">
         <aside className="w-80 shrink-0 space-y-6 overflow-y-auto border-r border-slate-800 p-5">
-          <LayerToggle active={activeLayer} phase={phase} onChange={setActiveLayer} />
+          <LayerToggle active={activeLayer} available={available} onChange={setActiveLayer} />
           <FilterPanel
             filters={filters}
             weights={weights}
-            phase={phase}
+            available={available}
             visible={visibleFips.size}
             total={Object.keys(counties).length}
             onFilters={setFilters}

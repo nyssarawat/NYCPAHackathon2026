@@ -1,11 +1,12 @@
 'use client';
 
 import type { Filters, CompositeWeights } from '@/lib/types';
+import { LAYER_META, type MetricAvailability } from '@/lib/colorScale';
 
 interface Props {
   filters: Filters;
   weights: CompositeWeights;
-  phase: 1 | 2;
+  available: MetricAvailability;
   visible: number;
   total: number;
   onFilters: (f: Filters) => void;
@@ -20,6 +21,7 @@ function Slider({
   step = 1,
   disabled,
   suffix,
+  info,
   onChange,
 }: {
   label: string;
@@ -29,12 +31,20 @@ function Slider({
   step?: number;
   disabled?: boolean;
   suffix?: string;
+  info?: string;
   onChange: (v: number) => void;
 }) {
   return (
-    <label className={`block ${disabled ? 'opacity-40' : ''}`}>
+    <label className={`block ${disabled ? 'opacity-40' : ''}`} title={info}>
       <div className="mb-1 flex justify-between text-xs">
-        <span className="text-slate-300">{label}</span>
+        <span className="text-slate-300">
+          {label}
+          {info && (
+            <span className="ml-1 cursor-help text-slate-500" aria-hidden>
+              ⓘ
+            </span>
+          )}
+        </span>
         <span className="tabular-nums text-slate-400">
           {value}
           {suffix ?? ''}
@@ -55,10 +65,11 @@ function Slider({
   );
 }
 
-export default function FilterPanel({ filters, weights, phase, visible, total, onFilters, onWeights }: Props) {
-  const p2 = phase < 2;
+export default function FilterPanel({ filters, weights, available, visible, total, onFilters, onWeights }: Props) {
   const setF = (patch: Partial<Filters>) => onFilters({ ...filters, ...patch });
   const setW = (patch: Partial<CompositeWeights>) => onWeights({ ...weights, ...patch });
+  const tip = (m: 'lyme' | 'income' | 'density' | 'competition') =>
+    `${LAYER_META[m].tip} — Source: ${LAYER_META[m].source}`;
 
   return (
     <div className="space-y-5">
@@ -73,6 +84,7 @@ export default function FilterPanel({ filters, weights, phase, visible, total, o
           <Slider
             label="Min Lyme percentile"
             value={filters.lymeMin}
+            info={tip('lyme')}
             onChange={(v) => setF({ lymeMin: v })}
           />
           <div>
@@ -97,13 +109,15 @@ export default function FilterPanel({ filters, weights, phase, visible, total, o
           <Slider
             label="Min SF-home density pct"
             value={filters.densityMin}
-            disabled={p2}
+            disabled={!available.density}
+            info={tip('density')}
             onChange={(v) => setF({ densityMin: v })}
           />
           <Slider
             label="Max competition pct"
             value={filters.competitionMax}
-            disabled={p2}
+            disabled={!available.competition}
+            info={tip('competition')}
             onChange={(v) => setF({ competitionMax: v })}
           />
         </div>
@@ -114,14 +128,23 @@ export default function FilterPanel({ filters, weights, phase, visible, total, o
           Opportunity weights
         </div>
         <div className="space-y-3">
-          <Slider label="Lyme risk" value={weights.lyme} min={0} max={2} step={0.1} onChange={(v) => setW({ lyme: v })} />
+          <Slider
+            label="Lyme risk"
+            value={weights.lyme}
+            min={0}
+            max={2}
+            step={0.1}
+            info={tip('lyme')}
+            onChange={(v) => setW({ lyme: v })}
+          />
           <Slider
             label="Buying power"
             value={weights.income}
             min={0}
             max={2}
             step={0.1}
-            disabled={p2}
+            disabled={!available.income}
+            info={tip('income')}
             onChange={(v) => setW({ income: v })}
           />
           <Slider
@@ -130,7 +153,8 @@ export default function FilterPanel({ filters, weights, phase, visible, total, o
             min={0}
             max={2}
             step={0.1}
-            disabled={p2}
+            disabled={!available.density}
+            info={tip('density')}
             onChange={(v) => setW({ density: v })}
           />
           <Slider
@@ -139,7 +163,8 @@ export default function FilterPanel({ filters, weights, phase, visible, total, o
             min={0}
             max={2}
             step={0.1}
-            disabled={p2}
+            disabled={!available.competition}
+            info={tip('competition')}
             onChange={(v) => setW({ competition: v })}
           />
         </div>
