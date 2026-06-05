@@ -7,6 +7,7 @@ import type { Feature, FeatureCollection, Geometry } from 'geojson';
 import type { CountyDatum, CompositeWeights, Layer } from '@/lib/types';
 import { layerValue } from '@/lib/score';
 import { colorFor, FILTERED_OUT } from '@/lib/colorScale';
+import { asset } from '@/lib/basePath';
 
 const W = 975;
 const H = 610;
@@ -46,7 +47,7 @@ export default function ChoroplethMap({ counties, activeLayer, weights, visibleF
 
   useEffect(() => {
     let alive = true;
-    fetch('/counties-10m.json')
+    fetch(asset('/counties-10m.json'))
       .then((r) => r.json())
       .then((j) => alive && setTopo(buildTopo(j)))
       .catch((e) => console.error('topojson load failed', e));

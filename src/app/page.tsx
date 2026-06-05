@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { CountyDataset, CountyDatum, CompositeWeights, Filters, Layer } from '@/lib/types';
 import { DEFAULT_WEIGHTS, computeComposite } from '@/lib/score';
 import { LAYER_META } from '@/lib/colorScale';
+import { asset } from '@/lib/basePath';
 import ChoroplethMap from '@/components/ChoroplethMap';
 import CountyHoverCard from '@/components/CountyHoverCard';
 import LayerToggle from '@/components/LayerToggle';
@@ -25,7 +26,7 @@ export default function Home() {
   const [hover, setHover] = useState<Hover | null>(null);
 
   useEffect(() => {
-    fetch('/counties.json')
+    fetch(asset('/counties.json'))
       .then((r) => r.json())
       .then(setData)
       .catch((e) => console.error('counties.json load failed', e));
