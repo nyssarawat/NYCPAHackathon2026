@@ -2,6 +2,7 @@
 
 import type { Filters, CompositeWeights } from '@/lib/types';
 import { LAYER_META, type MetricAvailability } from '@/lib/colorScale';
+import InfoDot from './InfoDot';
 
 interface Props {
   filters: Filters;
@@ -35,15 +36,11 @@ function Slider({
   onChange: (v: number) => void;
 }) {
   return (
-    <label className={`block ${disabled ? 'opacity-40' : ''}`} title={info}>
+    <label className={`block ${disabled ? 'opacity-40' : ''}`}>
       <div className="mb-1 flex justify-between text-xs">
         <span className="text-slate-300">
           {label}
-          {info && (
-            <span className="ml-1 cursor-help text-slate-500" aria-hidden>
-              ⓘ
-            </span>
-          )}
+          {info && <InfoDot text={info} />}
         </span>
         <span className="tabular-nums text-slate-400">
           {value}

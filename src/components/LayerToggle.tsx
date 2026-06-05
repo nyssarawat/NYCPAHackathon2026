@@ -2,6 +2,7 @@
 
 import type { Layer } from '@/lib/types';
 import { LAYER_META, LAYER_ORDER, type MetricAvailability } from '@/lib/colorScale';
+import InfoDot from './InfoDot';
 
 interface Props {
   active: Layer;
@@ -22,9 +23,8 @@ export default function LayerToggle({ active, available, onChange }: Props) {
             <button
               key={l}
               type="button"
-              disabled={locked}
-              onClick={() => onChange(l)}
-              title={`${meta.tip} — Source: ${meta.source}`}
+              aria-disabled={locked}
+              onClick={() => !locked && onChange(l)}
               className={[
                 'rounded-lg border px-3 py-2 text-left transition',
                 isActive
@@ -36,9 +36,7 @@ export default function LayerToggle({ active, available, onChange }: Props) {
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium text-slate-100">
                   {meta.label}
-                  <span className="ml-1 cursor-help text-slate-500" aria-hidden>
-                    ⓘ
-                  </span>
+                  <InfoDot text={`${meta.tip} — Source: ${meta.source}`} />
                 </span>
                 {locked && <span className="text-[10px] uppercase text-amber-400">needs key</span>}
               </div>
